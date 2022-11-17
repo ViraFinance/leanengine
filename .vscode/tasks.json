@@ -11,9 +11,9 @@
             "command": "dotnet",
             "args": [
                 "build",
-                "/p:Configuration=Debug",
-                "/p:DebugType=portable",
-                "/p:WarningLevel=1"
+                "//p:Configuration=Debug",
+                "//p:DebugType=portable",
+                "//p:WarningLevel=1"
             ],
             "group": "build",
             "presentation": {
@@ -28,9 +28,9 @@
             "args": [
                 "build",
                 "--no-incremental",
-                "/p:Configuration=Debug",
-                "/p:DebugType=portable",
-                "/p:WarningLevel=1"
+                "//p:Configuration=Debug",
+                "//p:DebugType=portable",
+                "//p:WarningLevel=1"
             ],
             "group": "build",
             "presentation": {
