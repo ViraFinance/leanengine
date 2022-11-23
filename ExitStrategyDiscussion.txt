@@ -1,0 +1,9 @@
+Exit Strategy
+
+First met scenario
+======================
+Scenario 1: Loss
+Exit When the market value goes below  bottom pivot (eg: 5 points)
+-----------------------------------------------
+Scenario 2: Profit
+Exit when market reaches entry value + 60 points

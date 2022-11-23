@@ -18,42 +18,40 @@ namespace QuantConnect.Algorithm.CSharp
     {
         private Symbol _minuteNifty50;
         private Symbol _dayNifty50;
-        private BaseDataConsolidator _fiveMinConsolidator;
+        // private BaseDataConsolidator _fiveMinConsolidator;
         private RollingWindow<DailyNifty50> _dailyBarsWindow;
-        private RollingWindow<TradeBar> _bullRollingWindow;
-        private RollingWindow<TradeBar> _bearRollingWindow;
+        private RollingWindow<MinutelyNifty50> _bullRollingWindow;
+        private RollingWindow<MinutelyNifty50> _bearRollingWindow;
 
         public override void Initialize()
         {
-            // SetTimeZone(TimeZones.Kolkata);
+            SetTimeZone(TimeZones.Kolkata);
             SetStartDate(2021, 1, 1);
             SetEndDate(2022, 10, 21);
             SetAccountCurrency("INR");
             SetCash(100000);
 
-            // UniverseSettings.DataNormalizationMode = DataNormalizationMode.Raw;
-            // UniverseSettings.MinimumTimeInUniverse = TimeSpan.Zero;
 
-            _minuteNifty50 = AddData<MinutelyNifty50>("MIN_NIFTY50", Resolution.Minute, TimeZones.Kolkata).Symbol;
+            _minuteNifty50 = AddData<MinutelyNifty50>("MIN_NIFTY50", null, TimeZones.Kolkata).Symbol;
             _dayNifty50 = AddData<DailyNifty50>("DAY_NIFTY50", Resolution.Daily, TimeZones.Kolkata).Symbol;
 
-            _fiveMinConsolidator = new BaseDataConsolidator(TimeSpan.FromMinutes(5));
-            _fiveMinConsolidator.DataConsolidated += FiveMinDataHandler;
-
-            _bullRollingWindow = new RollingWindow<TradeBar>(4);
-            _bearRollingWindow = new RollingWindow<TradeBar>(4);
-
-            // Schedule.On(DateRules.EveryDay(_minuteNifty50), TimeRules.At(15, 31, TimeZones.Kolkata), OneDayDataHandler);
+            _bullRollingWindow = new RollingWindow<MinutelyNifty50>(4);
+            _bearRollingWindow = new RollingWindow<MinutelyNifty50>(4);
 
             _dailyBarsWindow = new RollingWindow<DailyNifty50>(2);
-            SubscriptionManager.AddConsolidator(_minuteNifty50, _fiveMinConsolidator);
         }
 
-
-        private void FiveMinDataHandler(object sender, TradeBar baseData)
+        public void OnData(DailyNifty50 data)
         {
-            _bullRollingWindow.Add(baseData);
-            _bearRollingWindow.Add(baseData);
+            _dailyBarsWindow.Add(data);
+            _bullRollingWindow.Reset();
+            _bearRollingWindow.Reset();
+        }
+
+        public void OnData(MinutelyNifty50 data)
+        {
+            _bullRollingWindow.Add(data);
+            _bearRollingWindow.Add(data);
 
             if (!_bullRollingWindow.IsReady || !_bearRollingWindow.IsReady) return;
             // if (!(Time.Hour == 9 && Time.Minute == 15)) return;
@@ -66,30 +64,9 @@ namespace QuantConnect.Algorithm.CSharp
             if (!_dailyBarsWindow.IsReady) { return; }
             if ((_bullRollingWindow[0].Open < _dailyBarsWindow[0].TopPivot) && (_bullRollingWindow[0].Close > _dailyBarsWindow[0].TopPivot))
             {
-                Log($"Buy the next bar at {baseData.EndTime}: TOP PIVOT: {_dailyBarsWindow[1].TopPivot} BOTTOM PIVOT: {_dailyBarsWindow[1].BottomPivot}");
+                Log($"Going Long: {data.EndTime}: TOP PIVOT: {_dailyBarsWindow[0].TopPivot} | BOTTOM PIVOT: {_dailyBarsWindow[0].BottomPivot}");
                 _bullRollingWindow.Reset();
             }
-        }
-
-        public void OnData(DailyNifty50 data)
-        {
-            _dailyBarsWindow.Add(data);
-            // Log($"bar at {data.Time}: LOW: {data.Low} | PIVOT: {data.PivotPoint} | TOP PIVOT: {data.TopPivot} | BOTTOM PIVOT: {data.BottomPivot}");
-            // _bullRollingWindow.Add(data);
-            // _bearRollingWindow.Add(data);
-            // if (!_bullRollingWindow.IsReady || !_bearRollingWindow.IsReady) return;
-            // // if (!(Time.Hour == 9 && Time.Minute == 15)) return;
-            // // if (Portfolio.Invested) return;
-            // for (int i = 0; i < _bullRollingWindow.Size; i++)
-            // {
-            //     if (_bullRollingWindow[i].Open >= _bullRollingWindow[i].Close) return;
-            // }
-
-            // if ((_bullRollingWindow[0].Open < data.TopPivot) && (_bullRollingWindow[0].Close > data.TopPivot))
-            // {
-            //     Log($"Buy the next bar at {data.EndTime}: Close: {data.Close} TOP PIVOT: {data.TopPivot} BOTTOM PIVOT: {data.BottomPivot}");
-            //     _bullRollingWindow.Reset();
-            // }
         }
 
         /// <summary>
@@ -198,7 +175,7 @@ namespace QuantConnect.Algorithm.CSharp
         /// </summary>
         public override SubscriptionDataSource GetSource(SubscriptionDataConfig config, DateTime date, bool isLiveMode)
         {
-            return new SubscriptionDataSource(Path.Combine(Globals.DataFolder, "index", "india", "minute", "nifty50", $"NIFTY_50_2015_2022.csv"), SubscriptionTransportMedium.LocalFile);
+            return new SubscriptionDataSource(Path.Combine(Globals.DataFolder, "index", "india", "minute", "nifty50", $"NIFTY50_5mins.csv"), SubscriptionTransportMedium.LocalFile);
         }
         /// <summary>
         /// Reader converts each line of the data source into BaseData objects. Each data type creates its own factory method, and returns a new instance of the object
@@ -215,7 +192,7 @@ namespace QuantConnect.Algorithm.CSharp
                 //2011-09-13 09:15:00+05:30     7792.9      7799.9      7722.65   7748.7   116534670  
                 var data = line.Split(',');
                 index.Time = DateTime.Parse(data[0], CultureInfo.InvariantCulture);
-                index.EndTime = index.Time.AddMinutes(1);
+                index.EndTime = index.Time.AddMinutes(5);
                 index.Close = Convert.ToDecimal(data[1], CultureInfo.InvariantCulture);
                 index.High = Convert.ToDecimal(data[2], CultureInfo.InvariantCulture);
                 index.Low = Convert.ToDecimal(data[3], CultureInfo.InvariantCulture);
