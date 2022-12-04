@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using QuantConnect.Orders;
 using QuantConnect.Data;
 using QuantConnect.Data.Custom;
 using QuantConnect.Data.Consolidators;
@@ -17,11 +18,13 @@ namespace QuantConnect.Algorithm.CSharp
     public class ViraConsolidatedAlgo : QCAlgorithm
     {
         private Symbol _minuteNifty50;
+        private Symbol _fiveMinuteNifty50;
         private Symbol _dayNifty50;
         // private BaseDataConsolidator _fiveMinConsolidator;
         private RollingWindow<DailyNifty50> _dailyBarsWindow;
-        private RollingWindow<MinutelyNifty50> _bullRollingWindow;
-        private RollingWindow<MinutelyNifty50> _bearRollingWindow;
+        private RollingWindow<FiveMinuteNifty50> _bullRollingWindow;
+        private RollingWindow<FiveMinuteNifty50> _bearRollingWindow;
+        private decimal _last_fill_price;
 
         public override void Initialize()
         {
@@ -31,14 +34,21 @@ namespace QuantConnect.Algorithm.CSharp
             SetAccountCurrency("INR");
             SetCash(100000);
 
+            // SetBenchmark(_fiveMinuteNifty50);
 
-            _minuteNifty50 = AddData<MinutelyNifty50>("MIN_NIFTY50", null, TimeZones.Kolkata).Symbol;
+            _last_fill_price = 0;
+
+            _minuteNifty50 = AddData<MinuteNifty50>("MIN_NIFTY50", null, TimeZones.Kolkata).Symbol;
+            _fiveMinuteNifty50 = AddData<FiveMinuteNifty50>("5MIN_NIFTY50", null, TimeZones.Kolkata).Symbol;
             _dayNifty50 = AddData<DailyNifty50>("DAY_NIFTY50", Resolution.Daily, TimeZones.Kolkata).Symbol;
 
-            _bullRollingWindow = new RollingWindow<MinutelyNifty50>(4);
-            _bearRollingWindow = new RollingWindow<MinutelyNifty50>(4);
+
+            _bullRollingWindow = new RollingWindow<FiveMinuteNifty50>(4);
+            _bearRollingWindow = new RollingWindow<FiveMinuteNifty50>(4);
 
             _dailyBarsWindow = new RollingWindow<DailyNifty50>(2);
+
+            // Schedule.On(DateRules.EveryDay(_minuteNifty50), TimeRules.BeforeMarketClose(_minuteNifty50, 5), ExitPositions);
         }
 
         public void OnData(DailyNifty50 data)
@@ -48,27 +58,66 @@ namespace QuantConnect.Algorithm.CSharp
             _bearRollingWindow.Reset();
         }
 
-        public void OnData(MinutelyNifty50 data)
+        public void OnData(FiveMinuteNifty50 data)
         {
             _bullRollingWindow.Add(data);
             _bearRollingWindow.Add(data);
 
-            if (!_bullRollingWindow.IsReady || !_bearRollingWindow.IsReady) return;
             // if (!(Time.Hour == 9 && Time.Minute == 15)) return;
-            // if (Portfolio.Invested) return;
+            if (Portfolio.Invested) return;
+            if (!_dailyBarsWindow.IsReady) { return; }
+
+            if (!_bullRollingWindow.IsReady || !_bearRollingWindow.IsReady) return;
             for (int i = 0; i < _bullRollingWindow.Size; i++)
             {
                 if (_bullRollingWindow[i].Open >= _bullRollingWindow[i].Close) return;
             }
+            // for (int i = 0; i < _bearRollingWindow.Size; i++)
+            // {
+            //     if (_bearRollingWindow[i].Close >= _bearRollingWindow[i].Open) return;
+            // }
 
-            if (!_dailyBarsWindow.IsReady) { return; }
             if ((_bullRollingWindow[0].Open < _dailyBarsWindow[0].TopPivot) && (_bullRollingWindow[0].Close > _dailyBarsWindow[0].TopPivot))
             {
-                Log($"Going Long: {data.EndTime}: TOP PIVOT: {_dailyBarsWindow[0].TopPivot} | BOTTOM PIVOT: {_dailyBarsWindow[0].BottomPivot}");
+                Log($"Going Long on {data.EndTime}");
+                SetHoldings(_minuteNifty50, 1);
                 _bullRollingWindow.Reset();
+            }
+            // if ((_bearRollingWindow[0].Open < _dailyBarsWindow[0].TopPivot) && (_bearRollingWindow[0].Close > _dailyBarsWindow[0].TopPivot))
+            // {
+            //     SetHoldings(_minuteNifty50, -1);
+            //     _bearRollingWindow.Reset();
+            // }
+        }
+
+        public void OnData(MinuteNifty50 data)
+        {
+            // If invested check for exit strategy else entry strategy
+            if (!Portfolio.Invested) return;
+            if (
+                data.Price < (_dailyBarsWindow[0].BottomPivot - 5) ||
+                data.Price >= (_last_fill_price + 60)
+            )
+            {
+                Liquidate();
+                _bullRollingWindow.Reset();
+                _bearRollingWindow.Reset();
             }
         }
 
+        public override void OnOrderEvent(OrderEvent orderEvent)
+        {
+            if (orderEvent.Status == OrderStatus.Filled)
+            {
+                _last_fill_price = orderEvent.FillPrice;
+                Log($"bar at {orderEvent.FillPrice} | Quantity:{orderEvent.FillQuantity} | Time: {orderEvent.UtcTime.ToLocalTime()} | BOTTOM PIVOT: {_dailyBarsWindow[0].BottomPivot}");
+            }
+        }
+
+        public void ExitPositions()
+        {
+            Liquidate();
+        }
         /// <summary>
         /// This is used by the regression test system to indicate if the open source Lean repository has the required data to run this algorithm.
         /// </summary>
@@ -139,12 +188,10 @@ namespace QuantConnect.Algorithm.CSharp
 
 
     }
-
     /// <summary>
     /// NIFTY50 Minute Resolution Data Class
     /// </summary>
-
-    public class MinutelyNifty50 : BaseData
+    public class MinuteNifty50 : BaseData
     {
         /// <summary>
         /// Closing Price
@@ -166,9 +213,76 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// Default initializer for NIFTY50.
         /// </summary>
-        public MinutelyNifty50()
+        public MinuteNifty50()
         {
             Symbol = "MIN_NIFTY50";
+        }
+        /// <summary>
+        /// Return the URL string source of the file. This will be converted to a stream
+        /// </summary>
+        public override SubscriptionDataSource GetSource(SubscriptionDataConfig config, DateTime date, bool isLiveMode)
+        {
+            return new SubscriptionDataSource(Path.Combine(Globals.DataFolder, "index", "india", "minute", "nifty50", $"NIFTY_50_2015_2022.csv"), SubscriptionTransportMedium.LocalFile);
+        }
+        /// <summary>
+        /// Reader converts each line of the data source into BaseData objects. Each data type creates its own factory method, and returns a new instance of the object
+        /// each time it is called.
+        /// </summary>
+        public override BaseData Reader(SubscriptionDataConfig config, string line, DateTime date, bool isLiveMode)
+        {
+            //New MinuteNifty50 object
+            var index = new MinuteNifty50();
+            try
+            {
+                //Example File Format:
+                //Date,                         Close       High        Low       Open     Volume    
+                //2011-09-13 09:15:00+05:30     7792.9      7799.9      7722.65   7748.7   116534670  
+                var data = line.Split(',');
+                index.Time = DateTime.Parse(data[0], CultureInfo.InvariantCulture);
+                index.EndTime = index.Time.AddMinutes(1);
+                index.Close = Convert.ToDecimal(data[1], CultureInfo.InvariantCulture);
+                index.High = Convert.ToDecimal(data[2], CultureInfo.InvariantCulture);
+                index.Low = Convert.ToDecimal(data[3], CultureInfo.InvariantCulture);
+                index.Open = Convert.ToDecimal(data[4], CultureInfo.InvariantCulture);
+                index.Symbol = config.Symbol;
+                index.Value = index.Close;
+            }
+            catch
+            {
+                return null;
+            }
+            return index;
+        }
+    }
+    /// <summary>
+    /// NIFTY50 Minute Resolution Data Class
+    /// </summary>
+
+    public class FiveMinuteNifty50 : BaseData
+    {
+        /// <summary>
+        /// Closing Price
+        /// </summary>
+        public decimal Close;
+        /// <summary>
+        /// High Price
+        /// </summary>
+        public decimal High;
+        /// <summary>
+        /// Low Price
+        /// </summary>
+        public decimal Low;
+        /// <summary>
+        /// Opening Price
+        /// </summary>
+        public decimal Open;
+
+        /// <summary>
+        /// Default initializer for NIFTY50.
+        /// </summary>
+        public FiveMinuteNifty50()
+        {
+            Symbol = "5MIN_NIFTY50";
         }
         /// <summary>
         /// Return the URL string source of the file. This will be converted to a stream
@@ -183,8 +297,8 @@ namespace QuantConnect.Algorithm.CSharp
         /// </summary>
         public override BaseData Reader(SubscriptionDataConfig config, string line, DateTime date, bool isLiveMode)
         {
-            //New MinutelyNifty50 object
-            var index = new MinutelyNifty50();
+            //New MinuteNifty50 object
+            var index = new FiveMinuteNifty50();
             try
             {
                 //Example File Format:
@@ -209,7 +323,7 @@ namespace QuantConnect.Algorithm.CSharp
     }
 
     /// <summary>
-    /// NIFTY50 Minute Resolution Data Class
+    /// NIFTY50 Day Resolution Data Class
     /// </summary>
 
     public class DailyNifty50 : BaseData

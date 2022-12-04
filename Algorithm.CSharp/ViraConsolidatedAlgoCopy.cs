@@ -32,7 +32,7 @@ namespace QuantConnect.Algorithm.CSharp
             SetAccountCurrency("INR");
             SetCash(100000);
 
-            _symbol = AddData<MinutelyNifty50>("MIN_NIFTY50", Resolution.Minute).Symbol;
+            _symbol = AddData<MinuteNifty50>("MIN_NIFTY50", Resolution.Minute).Symbol;
 
             _centerPivot = 0;
             _topPivot = 0;
@@ -80,7 +80,7 @@ namespace QuantConnect.Algorithm.CSharp
             Log($"bar at {baseData.EndTime}: LOW: {baseData.Low} | PIVOT: {_centerPivot} | TOP PIVOT: {_topPivot} | BOTTOM PIVOT: {_bottomPivot}");
         }
 
-        // public void OnData(MinutelyNifty50 data)
+        // public void OnData(MinuteNifty50 data)
         // {
         //     _bullRollingWindow.Add(data);
         //     _bearRollingWindow.Add(data);
